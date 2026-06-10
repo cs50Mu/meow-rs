@@ -52,8 +52,8 @@ jobs:
 
       - run: cargo install --locked cargo-zigbuild
 
-      - name: Build release binary (static musl, default features)
-        run: cargo zigbuild --release --locked --target ${{ matrix.target }} --bin meow
+      - name: Build release binary (static musl, default features + anytls)
+        run: cargo zigbuild --release --locked --target ${{ matrix.target }} --features meow-config/anytls --bin meow
 
       - name: Build minimal release binary (stripped, for size check)
         if: matrix.minimal_budget_bytes != 0
