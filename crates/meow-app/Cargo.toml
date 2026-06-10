@@ -34,8 +34,10 @@ listener-mixed = ["meow-listener/listener-mixed"]
 
 # Convenience bundles
 minimal = ["ss", "trojan", "dns-server", "listener-mixed"]
+anytls = ["meow-config/anytls"]
+
 full = [
-    "ss", "trojan", "vless", "vless-vision", "vmess", "ech-tls-tunnel",
+    "ss", "trojan", "vless", "vless-vision", "vmess", "anytls", "ech-tls-tunnel",
     "dns-server", "dns-encrypted",
     "listener-http", "listener-socks5", "listener-tproxy", "listener-mixed",
 ]
