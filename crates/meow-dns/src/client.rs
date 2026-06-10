@@ -215,6 +215,10 @@ impl DnsClient {
     /// checked against the request — DoT/DoH/UDP-connected guarantee a 1:1
     /// pairing on the socket so spoofing a different ID would be a no-op.
     pub async fn query(&self, name: &str, record_type: RecordType) -> Result<Message, ClientError> {
+        // System transport resolves via getaddrinfo and synthesises a response.
+        if matches!(self.transport, Transport::System) {
+            return self.query_system(name, record_type).await;
+        }
         let id: u16 = rand::random();
         let mut msg = Message::new(id, MessageType::Query, OpCode::Query);
         msg.metadata.recursion_desired = true;
@@ -227,6 +231,48 @@ impl DnsClient {
             .await
             .map_err(|_| ClientError::Timeout(self.timeout))??;
         let resp = Message::from_bytes(&resp_bytes)?;
+        Ok(resp)
+    }
+
+    /// Resolve via the system resolver and build a synthetic DNS response Message.
+    async fn query_system(
+        &self,
+        name: &str,
+        record_type: RecordType,
+    ) -> Result<Message, ClientError> {
+        let addrs: Vec<IpAddr> = tokio::net::lookup_host((name, 0))
+            .await
+            .map_err(|_| ClientError::Timeout(self.timeout))?
+            .map(|a| a.ip())
+            .filter(|ip| match record_type {
+                RecordType::A => ip.is_ipv4(),
+                RecordType::AAAA => ip.is_ipv6(),
+                _ => true,
+            })
+            .collect();
+        if addrs.is_empty() {
+            return Err(ClientError::Timeout(self.timeout));
+        }
+        // Build a minimal NOERROR response with the resolved addresses as answers.
+        let id: u16 = rand::random();
+        let mut resp = Message::new(id, MessageType::Response, OpCode::Query);
+        resp.metadata.recursion_desired = true;
+        resp.metadata.response_code = hickory_proto::op::ResponseCode::NoError;
+        let parsed: Name = name
+            .parse()
+            .map_err(|_| ClientError::Protocol("invalid query name"))?;
+        resp.add_query(Query::query(parsed.clone(), record_type));
+        let ttl: u32 = 60;
+        for ip in addrs {
+            let rdata = match ip {
+                IpAddr::V4(v4) => hickory_proto::rr::RData::A(hickory_proto::rr::rdata::A(v4)),
+                IpAddr::V6(v6) => {
+                    hickory_proto::rr::RData::AAAA(hickory_proto::rr::rdata::AAAA(v6))
+                }
+            };
+            let rec = hickory_proto::rr::Record::from_rdata(parsed.clone(), ttl, rdata);
+            resp.add_answer(rec);
+        }
         Ok(resp)
     }
 
