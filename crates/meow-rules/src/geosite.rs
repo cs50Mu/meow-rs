@@ -221,15 +221,6 @@ impl GeositeDB {
     }
 }
 
-/// Default meow-rs config directory (same chain as GeoIP/ASN).
-fn meow_config_dir() -> PathBuf {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-        .unwrap_or_else(|| PathBuf::from("."));
-    base.join("meow")
-}
-
 /// Candidate paths for the geosite DB, in priority order. Returned
 /// regardless of whether the files exist; caller decides.
 ///
@@ -238,7 +229,7 @@ fn meow_config_dir() -> PathBuf {
 /// are present, since it parses ~10× faster and has no per-entry type
 /// fidelity loss.
 pub fn default_geosite_candidates() -> Vec<PathBuf> {
-    let cfg = meow_config_dir();
+    let cfg = meow_common::home_dir::home_dir();
     vec![
         cfg.join("geosite.mrs"),
         cfg.join("geosite.dat"),

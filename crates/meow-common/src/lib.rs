@@ -4,6 +4,7 @@ pub mod auth;
 pub mod conn;
 pub mod dns_mode;
 pub mod error;
+pub mod home_dir;
 pub mod metadata;
 pub mod network;
 pub mod process_lookup;

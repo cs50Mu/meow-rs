@@ -102,6 +102,9 @@ fn main() -> Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     // Load config
+    if let Some(dir) = &args.directory {
+        meow_common::home_dir::set_home_dir(dir.into());
+    }
     let config_path = if let Some(dir) = &args.directory {
         format!("{}/{}", dir, args.config)
     } else {
