@@ -54,14 +54,12 @@ async fn run_health_check_loop(tunnel: Tunnel, spec: HealthCheckSpec) {
             );
             continue;
         };
-        let Some(member_names) = group.members() else {
+        let Some(members) = group.member_proxies() else {
             continue;
         };
-
-        let members: Vec<_> = member_names
-            .into_iter()
-            .filter_map(|n| proxies.get(n.as_str()).cloned().map(|p| (n, p)))
-            .collect();
+        if members.is_empty() {
+            continue;
+        }
         drop(route);
 
         let url = spec.url.clone();

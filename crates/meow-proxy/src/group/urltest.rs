@@ -240,6 +240,19 @@ impl Proxy for UrlTestGroup {
         Some(self.member_names())
     }
 
+    fn member_proxies(&self) -> Option<Vec<(String, Arc<dyn Proxy>)>> {
+        let mut out = Vec::new();
+        for p in &self.static_proxies {
+            out.push((p.name().to_string(), Arc::clone(p)));
+        }
+        for slot in &self.provider_slots {
+            for p in slot.read().iter() {
+                out.push((p.name().to_string(), Arc::clone(p)));
+            }
+        }
+        Some(out)
+    }
+
     fn current(&self) -> Option<String> {
         self.fastest_proxy().map(|p| p.name().into())
     }

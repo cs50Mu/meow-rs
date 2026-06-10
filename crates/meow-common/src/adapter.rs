@@ -150,6 +150,13 @@ pub trait Proxy: ProxyAdapter {
     fn members(&self) -> Option<Vec<String>> {
         None
     }
+    /// For group adapters: the members with their proxy objects, suitable
+    /// for health checks. Defaults to looking up names from [`members`]
+    /// in the tunnel's proxy map; groups with provider-backed members
+    /// override to return proxies directly from their slots.
+    fn member_proxies(&self) -> Option<Vec<(String, Arc<dyn Proxy>)>> {
+        None
+    }
     /// For group adapters: the name of the currently active member
     /// (selected/fastest/first-alive depending on group kind).
     fn current(&self) -> Option<String> {
