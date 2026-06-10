@@ -174,31 +174,36 @@ pub type RebuildResult = (HashMap<SmolStr, Arc<dyn Proxy>>, Vec<Box<dyn Rule>>);
 ///
 /// Does not resolve rule-provider cache paths; use
 /// [`rebuild_from_raw_with_cache_dir`] when a working directory is available.
+/// Synchronous wrapper for use in tests and non-async contexts.
 pub fn rebuild_from_raw(raw: &raw::RawConfig) -> Result<RebuildResult, anyhow::Error> {
-    rebuild_from_raw_impl(raw, None, None, &HashMap::new(), None, None)
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow::anyhow!("building temporary runtime for rebuild: {e}"))?;
+    rt.block_on(rebuild_from_raw_with_resolver(raw, None))
 }
 
 /// Rebuild proxies/rules and inject `resolver` into the built-in DIRECT
 /// adapter so it avoids the OS resolver when dialing hostnames.
-pub fn rebuild_from_raw_with_resolver(
+pub async fn rebuild_from_raw_with_resolver(
     raw: &raw::RawConfig,
     resolver: Option<Arc<Resolver>>,
 ) -> Result<RebuildResult, anyhow::Error> {
-    rebuild_from_raw_impl(raw, None, resolver, &HashMap::new(), None, None)
+    rebuild_from_raw_impl(raw, None, resolver, &HashMap::new(), None, None).await
 }
 
 /// Same as [`rebuild_from_raw`] but accepts a `cache_dir` used to resolve
 /// relative rule-provider paths and to cache fetched HTTP payloads, and an
 /// optional DNS `resolver` injected into the built-in DIRECT adapter.
-pub fn rebuild_from_raw_with_cache_dir(
+pub async fn rebuild_from_raw_with_cache_dir(
     raw: &raw::RawConfig,
     cache_dir: Option<&Path>,
     resolver: Option<Arc<Resolver>>,
 ) -> Result<RebuildResult, anyhow::Error> {
-    rebuild_from_raw_impl(raw, cache_dir, resolver, &HashMap::new(), None, None)
+    rebuild_from_raw_impl(raw, cache_dir, resolver, &HashMap::new(), None, None).await
 }
 
-fn rebuild_from_raw_impl(
+async fn rebuild_from_raw_impl(
     raw: &raw::RawConfig,
     cache_dir: Option<&Path>,
     resolver: Option<Arc<Resolver>>,
@@ -311,7 +316,7 @@ fn rebuild_from_raw_impl(
     let download_proxy = internal_http::first_named_proxy(raw.proxies.as_deref(), &proxies);
     let providers = match raw.rule_providers.as_ref() {
         Some(map) if !map.is_empty() => {
-            rule_provider::load_providers(map, cache_dir, ctx, download_proxy.as_ref())
+            rule_provider::load_providers(map, cache_dir, ctx, download_proxy.as_ref()).await
         }
         _ => HashMap::new(),
     };
@@ -972,7 +977,8 @@ async fn build_config(
         &proxy_providers,
         selector_store.as_ref(),
         Some(&ctx),
-    )?;
+    )
+    .await?;
 
     // DNS — pass the explicit mmdb path so fallback-filter GeoIP uses the
     // same path as the rule engine, plus the proxy registry from step 1
@@ -987,12 +993,13 @@ async fn build_config(
         &proxy_providers,
         selector_store.as_ref(),
         Some(&ctx),
-    )?;
+    )
+    .await?;
 
     let download_proxy = internal_http::first_named_proxy(raw.proxies.as_deref(), &proxies);
     let rule_providers = match raw.rule_providers.as_ref() {
         Some(map) if !map.is_empty() => {
-            rule_provider::load_providers(map, cache_dir, &ctx, download_proxy.as_ref())
+            rule_provider::load_providers(map, cache_dir, &ctx, download_proxy.as_ref()).await
         }
         _ => HashMap::new(),
     };

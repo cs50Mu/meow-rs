@@ -114,7 +114,7 @@ pub async fn run_on_startup(
     }
 
     let raw = raw_config.read().clone();
-    match meow_config::rebuild_from_raw_with_resolver(&raw, Some(Arc::clone(&resolver))) {
+    match meow_config::rebuild_from_raw_with_resolver(&raw, Some(Arc::clone(&resolver))).await {
         Ok((_proxies, new_rules)) => {
             tunnel.update_rules(new_rules);
             info!("geodata startup-fetch: rules reloaded with downloaded DBs");
@@ -188,7 +188,7 @@ pub async fn auto_update_loop(
         }
 
         let raw = raw_config.read().clone();
-        match meow_config::rebuild_from_raw_with_resolver(&raw, Some(Arc::clone(&resolver))) {
+        match meow_config::rebuild_from_raw_with_resolver(&raw, Some(Arc::clone(&resolver))).await {
             Ok((_proxies, new_rules)) => {
                 tunnel.update_rules(new_rules);
                 info!("geodata auto-update: rules reloaded with updated DBs");

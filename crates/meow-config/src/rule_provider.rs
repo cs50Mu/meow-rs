@@ -127,7 +127,7 @@ impl RuleProvider {
 ///
 /// Returns a map from provider name to `Arc<RuleProvider>`.  Providers that
 /// fail to load are skipped with a `warn!` (best-effort keep-running).
-pub fn load_providers(
+pub async fn load_providers(
     raw_providers: &HashMap<String, RawRuleProvider>,
     cache_dir: Option<&Path>,
     ctx: &ParserContext,
@@ -138,7 +138,7 @@ pub fn load_providers(
         return out;
     }
     for (name, cfg) in raw_providers {
-        match load_one(name, cfg, cache_dir, ctx, download_proxy) {
+        match load_one(name, cfg, cache_dir, ctx, download_proxy).await {
             Ok(provider) => {
                 info!(
                     "Loaded rule-provider '{}' ({}/{}): {} entries",
@@ -169,7 +169,7 @@ pub fn snapshot_ruleset_map(
         .collect()
 }
 
-fn load_one(
+async fn load_one(
     name: &str,
     cfg: &RawRuleProvider,
     cache_dir: Option<&Path>,
@@ -180,7 +180,7 @@ fn load_one(
     match cfg.provider_type.as_str() {
         "inline" => load_inline(name, cfg, behavior, ctx),
         "file" => load_file(name, cfg, cache_dir, behavior, ctx),
-        "http" => load_http(name, cfg, cache_dir, behavior, ctx, download_proxy),
+        "http" => load_http(name, cfg, cache_dir, behavior, ctx, download_proxy).await,
         other => Err(anyhow!("unknown rule-provider type: {other}")),
     }
 }
@@ -245,7 +245,7 @@ fn load_file(
     ))
 }
 
-fn load_http(
+async fn load_http(
     name: &str,
     cfg: &RawRuleProvider,
     cache_dir: Option<&Path>,
@@ -258,7 +258,31 @@ fn load_http(
         .as_deref()
         .ok_or_else(|| anyhow!("http provider '{name}' requires a 'url'"))?;
     let cache_path = resolve_path(cfg, cache_dir, name);
-    let bytes = fetch_http_blocking_with_cache(url, cache_path.as_deref(), download_proxy)?;
+    let bytes = match fetch_http_async(url, download_proxy).await {
+        Ok(bytes) => {
+            if let Some(path) = &cache_path {
+                write_cache(path, &bytes);
+            }
+            bytes
+        }
+        Err(fetch_err) => {
+            if let Some(path) = &cache_path {
+                if path.exists() {
+                    warn!(
+                        "rule-provider fetch failed ({}); falling back to cache {}",
+                        fetch_err,
+                        path.display()
+                    );
+                    std::fs::read(path)
+                        .with_context(|| format!("reading cached provider {}", path.display()))?
+                } else {
+                    return Err(fetch_err);
+                }
+            } else {
+                return Err(fetch_err);
+            }
+        }
+    };
     let explicit_format = parse_explicit_format(cfg)?;
     let rules = parse_bytes_to_ruleset_with_format(&bytes, behavior, explicit_format, ctx)?;
     let interval = cfg.interval.unwrap_or(0);
@@ -382,43 +406,6 @@ fn resolve_path(cfg: &RawRuleProvider, cache_dir: Option<&Path>, name: &str) -> 
 // HTTP fetch
 // ---------------------------------------------------------------------------
 
-fn fetch_http_blocking_with_cache(
-    url: &str,
-    cache_path: Option<&Path>,
-    proxy: Option<&Arc<dyn Proxy>>,
-) -> Result<Vec<u8>> {
-    match fetch_http_blocking(url, proxy) {
-        Ok(bytes) => {
-            if let Some(path) = cache_path {
-                write_cache(path, &bytes);
-            }
-            Ok(bytes)
-        }
-        Err(fetch_err) => {
-            if let Some(path) = cache_path {
-                if path.exists() {
-                    warn!(
-                        "rule-provider fetch failed ({}); falling back to cache {}",
-                        fetch_err,
-                        path.display()
-                    );
-                    return std::fs::read(path)
-                        .with_context(|| format!("reading cached provider {}", path.display()));
-                }
-            }
-            Err(fetch_err)
-        }
-    }
-}
-
-fn fetch_http_blocking(url: &str, proxy: Option<&Arc<dyn Proxy>>) -> Result<Vec<u8>> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("building temporary tokio runtime for rule-provider fetch")?;
-    rt.block_on(fetch_http_async(url, proxy))
-}
-
 pub(crate) async fn fetch_http_async(url: &str, proxy: Option<&Arc<dyn Proxy>>) -> Result<Vec<u8>> {
     if let Some(p) = proxy {
         return internal_http::fetch_via_proxy(url, p).await;
@@ -478,8 +465,8 @@ mod tests {
         ParserContext::empty()
     }
 
-    #[test]
-    fn yaml_file_provider_loads() {
+    #[tokio::test]
+    async fn yaml_file_provider_loads() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("list.yaml");
         std::fs::write(&file_path, "payload:\n  - '+.example.com'\n  - foo.com\n").unwrap();
@@ -496,15 +483,15 @@ mod tests {
                 payload: None,
             },
         );
-        let out = load_providers(&providers, Some(dir.path()), &ctx(), None);
+        let out = load_providers(&providers, Some(dir.path()), &ctx(), None).await;
         assert_eq!(out.len(), 1);
         let p = out.get("test").unwrap();
         assert_eq!(p.behavior, RuleSetBehavior::Domain);
         assert_eq!(p.rule_count(), 2);
     }
 
-    #[test]
-    fn inline_provider_loads_payload() {
+    #[tokio::test]
+    async fn inline_provider_loads_payload() {
         let mut providers = HashMap::new();
         providers.insert(
             "my-rules".to_string(),
@@ -518,7 +505,7 @@ mod tests {
                 payload: Some(vec!["example.com".to_string(), "+.foo.com".to_string()]),
             },
         );
-        let out = load_providers(&providers, None, &ctx(), None);
+        let out = load_providers(&providers, None, &ctx(), None).await;
         assert_eq!(out.len(), 1);
         let p = out.get("my-rules").unwrap();
         assert_eq!(p.provider_type, ProviderType::Inline);
@@ -544,8 +531,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mrs_format_auto_detected_by_magic_bytes() {
+    #[tokio::test]
+    async fn mrs_format_auto_detected_by_magic_bytes() {
         let bytes = write_ruleset_mrs(TYPE_DOMAIN, &["example.com", "+.foo.com"]).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("rules.mrs");
@@ -563,13 +550,13 @@ mod tests {
                 payload: None,
             },
         );
-        let out = load_providers(&providers, None, &ctx(), None);
+        let out = load_providers(&providers, None, &ctx(), None).await;
         let p = out.get("mrs-test").expect("provider should load");
         assert_eq!(p.rule_count(), 2);
     }
 
-    #[test]
-    fn mrs_explicit_format_override() {
+    #[tokio::test]
+    async fn mrs_explicit_format_override() {
         let bytes = write_ruleset_mrs(TYPE_DOMAIN, &["example.com"]).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("rules.bin");
@@ -587,12 +574,12 @@ mod tests {
                 payload: None,
             },
         );
-        let out = load_providers(&providers, None, &ctx(), None);
+        let out = load_providers(&providers, None, &ctx(), None).await;
         assert_eq!(out.get("x").unwrap().rule_count(), 1);
     }
 
-    #[test]
-    fn bad_provider_is_skipped() {
+    #[tokio::test]
+    async fn bad_provider_is_skipped() {
         let mut providers = HashMap::new();
         providers.insert(
             "nope".to_string(),
@@ -606,12 +593,12 @@ mod tests {
                 payload: None,
             },
         );
-        let out = load_providers(&providers, None, &ctx(), None);
+        let out = load_providers(&providers, None, &ctx(), None).await;
         assert!(out.is_empty());
     }
 
-    #[test]
-    fn file_provider_interval_warns_but_loads() {
+    #[tokio::test]
+    async fn file_provider_interval_warns_but_loads() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("list.yaml");
         std::fs::write(&file_path, "payload:\n  - 'example.com'\n").unwrap();
@@ -628,12 +615,12 @@ mod tests {
                 payload: None,
             },
         );
-        let out = load_providers(&providers, None, &ctx(), None);
+        let out = load_providers(&providers, None, &ctx(), None).await;
         assert_eq!(out.len(), 1);
     }
 
-    #[test]
-    fn snapshot_ruleset_map_returns_all_providers() {
+    #[tokio::test]
+    async fn snapshot_ruleset_map_returns_all_providers() {
         let mut providers = HashMap::new();
         providers.insert(
             "p1".to_string(),
@@ -659,7 +646,7 @@ mod tests {
                 payload: Some(vec!["10.0.0.0/8".to_string()]),
             },
         );
-        let out = load_providers(&providers, None, &ctx(), None);
+        let out = load_providers(&providers, None, &ctx(), None).await;
         let ruleset_map = snapshot_ruleset_map(&out);
         assert_eq!(ruleset_map.len(), 2);
         assert!(ruleset_map.contains_key("p1"));

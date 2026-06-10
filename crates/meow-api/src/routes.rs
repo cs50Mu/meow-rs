@@ -544,6 +544,7 @@ async fn apply_raw_to_tunnel(
     }
     let (proxies, rules) =
         meow_config::rebuild_from_raw_with_resolver(&raw, Some(Arc::clone(tunnel.resolver())))
+            .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     tunnel.update_proxies(proxies);
     tunnel.update_rules(rules);
@@ -1214,7 +1215,7 @@ async fn put_configs(
     // Semantic rebuild (proxy/rule parsing)
     let resolver = Arc::clone(state.tunnel.resolver());
     let (proxies, rules) =
-        match meow_config::rebuild_from_raw_with_resolver(&raw_config, Some(resolver)) {
+        match meow_config::rebuild_from_raw_with_resolver(&raw_config, Some(resolver)).await {
             Ok(r) => r,
             Err(e) => {
                 if force {
