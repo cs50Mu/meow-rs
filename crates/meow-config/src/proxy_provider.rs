@@ -113,7 +113,11 @@ impl ProxyProvider {
                 )
             }),
             Vehicle::Http { url, cache_path } => {
-                match reqwest::get(url).await {
+                let client = reqwest::Client::builder()
+                    .user_agent(concat!("clash.meta/", env!("CARGO_PKG_VERSION")))
+                    .build()
+                    .map_err(|e| format!("proxy-provider '{}': {}", self.name, e))?;
+                match client.get(url).send().await {
                     Ok(resp) if resp.status().is_success() => {
                         match resp.text().await {
                             Ok(text) => {
