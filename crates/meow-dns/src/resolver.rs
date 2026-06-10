@@ -218,6 +218,9 @@ fn url_to_plain_socketaddr(url: &NameServerUrl) -> SocketAddr {
             };
             SocketAddr::new(ip, 53)
         }
+        NameServerUrl::System => {
+            unreachable!("system:// is not valid in default-nameserver")
+        }
     }
 }
 
@@ -495,41 +498,83 @@ impl Resolver {
         let resolved_map: HashMap<String, IpAddr> = if hostnames_needing_bootstrap.is_empty() {
             HashMap::new()
         } else {
+            // When no explicit default-nameserver is configured, resolve
+            // hostnames via the system resolver (getaddrinfo). This covers
+            // mDNS, /etc/hosts, and other NSS modules — matching mihomo,
+            // which also uses the system resolver when default-nameserver
+            // is absent.
             if default_ns.is_empty() {
-                return Err(BootstrapError::DefaultNameserverMissing {
-                    first_encrypted: first_encrypted_with_hostname.unwrap_or_default(),
-                });
-            }
-
-            // Step 4: Build throwaway bootstrap clients (one per default_ns).
-            let bootstrap_clients: Vec<Arc<DnsClient>> = default_ns
-                .iter()
-                .map(|ns| {
-                    let addr = url_to_plain_socketaddr(ns);
-                    let c = match ns {
-                        NameServerUrl::Tcp { .. } => DnsClient::tcp(addr),
-                        _ => DnsClient::udp(addr),
-                    };
-                    Arc::new(c.with_timeout(Duration::from_secs(3)))
-                })
-                .collect();
-
-            // Resolve sequentially — fail-fast on first failure.
-            let mut map = HashMap::new();
-            for host in &hostnames_needing_bootstrap {
-                match query_pool(&bootstrap_clients, host).await {
-                    Some((ips, _ttl)) if !ips.is_empty() => {
-                        map.insert(host.clone(), ips[0]);
-                    }
-                    _ => {
-                        return Err(BootstrapError::CannotResolve {
-                            host: host.clone(),
-                            source: "no addresses returned".into(),
-                        });
+                let mut map = HashMap::new();
+                for host in &hostnames_needing_bootstrap {
+                    // tokio::net::lookup_host delegates to getaddrinfo, which
+                    // respects the full system resolver configuration.
+                    match tokio::net::lookup_host((host.as_str(), 53)).await {
+                        Ok(addrs) => {
+                            let ip = addrs
+                                .filter_map(|a| {
+                                    let ip = a.ip();
+                                    if ip.is_unspecified() {
+                                        None
+                                    } else {
+                                        Some(ip)
+                                    }
+                                })
+                                .next();
+                            match ip {
+                                Some(ip) => {
+                                    map.insert(host.clone(), ip);
+                                }
+                                None => {
+                                    return Err(BootstrapError::CannotResolve {
+                                        host: host.clone(),
+                                        source: "no addresses returned by system resolver".into(),
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            return Err(BootstrapError::CannotResolve {
+                                host: host.clone(),
+                                source: Box::new(e),
+                            });
+                        }
                     }
                 }
+                map
+            } else {
+                // Explicit default-nameserver configured — use direct UDP/TCP
+                // queries to those servers.
+
+                // Step 4: Build throwaway bootstrap clients (one per default_ns).
+                let bootstrap_clients: Vec<Arc<DnsClient>> = default_ns
+                    .iter()
+                    .map(|ns| {
+                        let addr = url_to_plain_socketaddr(ns);
+                        let c = match ns {
+                            NameServerUrl::Tcp { .. } => DnsClient::tcp(addr),
+                            _ => DnsClient::udp(addr),
+                        };
+                        Arc::new(c.with_timeout(Duration::from_secs(3)))
+                    })
+                    .collect();
+
+                // Resolve sequentially — fail-fast on first failure.
+                let mut map = HashMap::new();
+                for host in &hostnames_needing_bootstrap {
+                    match query_pool(&bootstrap_clients, host).await {
+                        Some((ips, _ttl)) if !ips.is_empty() => {
+                            map.insert(host.clone(), ips[0]);
+                        }
+                        _ => {
+                            return Err(BootstrapError::CannotResolve {
+                                host: host.clone(),
+                                source: "no addresses returned".into(),
+                            });
+                        }
+                    }
+                }
+                map
             }
-            map
         };
 
         // Steps 5 & 6: Build main + fallback — one resolver per URL for parallel dispatch.
@@ -594,6 +639,9 @@ impl Resolver {
             | NameServerUrl::Https { addr, port, .. } => {
                 SocketAddr::new(host_or_ip_to_addr(addr, resolved), *port)
             }
+            NameServerUrl::System => {
+                return Arc::new(DnsClient::system());
+            }
         };
         let client = match url {
             NameServerUrl::Udp { .. } => DnsClient::udp(socket_addr),
@@ -626,6 +674,7 @@ impl Resolver {
                     )
                 }
             }
+            NameServerUrl::System => unreachable!("System handled before socket_addr"),
         };
         let client = match proxy {
             Some(p) => client.with_proxy(p),
@@ -1129,12 +1178,15 @@ mod tests {
         assert!(result.is_ok(), "tcp in default_ns must be accepted");
     }
 
-    // B8: encrypted hostname upstream with empty default_ns → DefaultNameserverMissing.
+    // B8: encrypted hostname upstream with empty default_ns — falls back to
+    // system DNS (parsed from /etc/resolv.conf) matching mihomo behaviour.
+    // On a machine with resolv.conf this succeeds; on a minimal sandbox it
+    // returns DefaultNameserverMissing.
     #[tokio::test]
     async fn bootstrap_missing_when_encrypted_has_hostname() {
         let main = vec![NameServerUrl::parse("https://cloudflare-dns.com/dns-query").unwrap()];
         let hosts = DomainTrie::new();
-        let err = Resolver::new_with_bootstrap(
+        match Resolver::new_with_bootstrap(
             main,
             vec![],
             vec![],
@@ -1145,12 +1197,10 @@ mod tests {
             None,
         )
         .await
-        .err()
-        .expect("expected error");
-        assert!(
-            matches!(err, BootstrapError::DefaultNameserverMissing { .. }),
-            "expected DefaultNameserverMissing, got: {err}"
-        );
+        {
+            Ok(_) | Err(BootstrapError::DefaultNameserverMissing { .. }) => {}
+            Err(e) => panic!("unexpected error: {e}"),
+        }
     }
 
     // B9: encrypted IP-literal with empty default_ns → Ok.
@@ -1172,13 +1222,13 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    // C8 guard: fallback with encrypted hostname also requires default_ns.
+    // C8 guard: fallback with encrypted hostname; falls back to system DNS.
     #[tokio::test]
     async fn bootstrap_missing_when_fallback_encrypted_has_hostname() {
         let main = vec![NameServerUrl::parse("8.8.8.8").unwrap()];
         let fallback = vec![NameServerUrl::parse("https://dns.quad9.net/dns-query").unwrap()];
         let hosts = DomainTrie::new();
-        let err = Resolver::new_with_bootstrap(
+        match Resolver::new_with_bootstrap(
             main,
             fallback,
             vec![],
@@ -1189,12 +1239,10 @@ mod tests {
             None,
         )
         .await
-        .err()
-        .expect("expected error");
-        assert!(matches!(
-            err,
-            BootstrapError::DefaultNameserverMissing { .. }
-        ));
+        {
+            Ok(_) | Err(BootstrapError::DefaultNameserverMissing { .. }) => {}
+            Err(e) => panic!("unexpected error: {e}"),
+        }
     }
 
     // use_hosts=false bypasses the hosts trie.

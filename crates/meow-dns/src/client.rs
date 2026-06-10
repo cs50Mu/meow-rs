@@ -129,6 +129,9 @@ enum Transport {
         path: Arc<str>,
         tls: Arc<rustls::ClientConfig>,
     },
+    /// Use the system resolver (libc `getaddrinfo`) for name resolution.
+    /// Matches mihomo's `system://` nameserver type.
+    System,
 }
 
 impl DnsClient {
@@ -179,6 +182,15 @@ impl DnsClient {
         }
     }
 
+    /// Use the system resolver (libc `getaddrinfo`) for name resolution.
+    pub fn system() -> Self {
+        Self {
+            transport: Transport::System,
+            timeout: DEFAULT_QUERY_TIMEOUT,
+            proxy: None,
+        }
+    }
+
     /// Override the per-query timeout.
     pub fn with_timeout(mut self, t: Duration) -> Self {
         self.timeout = t;
@@ -222,6 +234,20 @@ impl DnsClient {
     /// (addrs, min_ttl).  Empty answer set returns `Ok((vec![], _))`; upstream
     /// SERVFAIL surfaces as `ClientError::Rcode`.
     pub async fn lookup_ip(&self, name: &str) -> Result<(Vec<IpAddr>, Duration), ClientError> {
+        if matches!(self.transport, Transport::System) {
+            // Use the system resolver (getaddrinfo) for name resolution.
+            // Matches mihomo's system:// nameserver behaviour.
+            let addrs: Vec<IpAddr> = tokio::net::lookup_host((name, 0))
+                .await
+                .map_err(|_| ClientError::Timeout(Duration::from_secs(5)))?
+                .map(|a| a.ip())
+                .collect();
+            if addrs.is_empty() {
+                return Err(ClientError::Timeout(Duration::from_secs(5)));
+            }
+            // Return a synthetic TTL so callers don't cache indefinitely.
+            return Ok((addrs, Duration::from_secs(60)));
+        }
         let (a, aaaa) = tokio::join!(
             self.query(name, RecordType::A),
             self.query(name, RecordType::AAAA),
@@ -256,6 +282,11 @@ impl DnsClient {
         if let Some(proxy) = self.proxy.as_ref() {
             let addr = match &self.transport {
                 Transport::Udp { addr } | Transport::Tcp { addr } => *addr,
+                Transport::System => {
+                    return Err(ClientError::Tls(
+                        "system:// nameserver cannot be used with #PROXY".into(),
+                    ));
+                }
                 #[cfg(feature = "encrypted")]
                 Transport::Dot { .. } | Transport::Doh { .. } => {
                     // DoT/DoH-over-proxy needs TLS layered on a Box<dyn
@@ -287,6 +318,7 @@ impl DnsClient {
                 path,
                 tls,
             } => doh_exchange(*addr, sni, path, Arc::clone(tls), wire).await,
+            Transport::System => unreachable!("lookup_ip short-circuits System before exchange"),
         }
     }
 }

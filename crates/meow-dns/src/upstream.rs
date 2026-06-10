@@ -24,6 +24,9 @@ pub enum NameServerUrl {
         path: String,
         sni: String,
     },
+    /// Use the system resolver (libc `getaddrinfo`) for DNS queries.
+    /// Matches mihomo's `system://` nameserver type.
+    System,
 }
 
 /// Either a resolved IP address or a hostname that requires bootstrap resolution.
@@ -56,6 +59,7 @@ impl fmt::Display for NameServerUrl {
             } => {
                 write!(f, "https://{addr}:{port}{path}#{sni}")
             }
+            NameServerUrl::System => write!(f, "system://"),
         }
     }
 }
@@ -126,6 +130,7 @@ impl NameServerUrl {
             | NameServerUrl::Tcp { addr, .. }
             | NameServerUrl::Tls { addr, .. }
             | NameServerUrl::Https { addr, .. } => addr,
+            NameServerUrl::System => return None,
         };
         match addr {
             HostOrIp::Host(h) => Some(h.as_str()),
@@ -135,7 +140,10 @@ impl NameServerUrl {
 
     /// Returns true if this is a plain (non-encrypted) nameserver.
     pub fn is_plain(&self) -> bool {
-        matches!(self, NameServerUrl::Udp { .. } | NameServerUrl::Tcp { .. })
+        matches!(
+            self,
+            NameServerUrl::Udp { .. } | NameServerUrl::Tcp { .. } | NameServerUrl::System
+        )
     }
 
     /// Parse a nameserver string into a `NameServerUrl`.
@@ -161,6 +169,16 @@ impl NameServerUrl {
         };
 
         // Dispatch on scheme
+        if let Some(rest) = s_no_frag.strip_prefix("system://") {
+            // system:// → use the system resolver (matches mihomo).
+            // Ignore any trailing host/port — the system resolver has its own config.
+            let _ = rest;
+            return Ok(NameServerUrl::System);
+        }
+        if s_no_frag == "system" {
+            // Bare "system" → same as system:// (matches mihomo).
+            return Ok(NameServerUrl::System);
+        }
         if let Some(rest) = s_no_frag.strip_prefix("tls://") {
             return Self::parse_tls(rest, fragment);
         }
