@@ -11,8 +11,31 @@ use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelayHistory {
+    /// Unix timestamp in milliseconds (matches mihomo JSON format).
+    #[serde(
+        serialize_with = "serialize_system_time_ms",
+        deserialize_with = "deserialize_system_time_ms"
+    )]
     pub time: SystemTime,
     pub delay: u16,
+}
+
+fn serialize_system_time_ms<S: serde::Serializer>(
+    t: &SystemTime,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    let ms = t
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    s.serialize_u64(ms)
+}
+
+fn deserialize_system_time_ms<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<SystemTime, D::Error> {
+    let ms: u64 = serde::Deserialize::deserialize(d)?;
+    Ok(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
