@@ -336,8 +336,8 @@ async function loadProxySelector() {
         const ptype = info ? info.type : '?';
         const proxyEsc = esc(p);
         const itemCls = isSelector ? `proxy-item${selected}` : 'proxy-item non-select';
-        const dataAttr = isSelector ? ` data-group="${esc(g.name)}" data-proxy="${proxyEsc}"` : '';
-        grid += `<div class="${itemCls}"${dataAttr} title="${proxyEsc}">`;
+        const clickAttr = isSelector ? ` data-group="${esc(g.name)}"` : '';
+        grid += `<div class="${itemCls}" data-proxy="${proxyEsc}"${clickAttr} title="${proxyEsc}">`;
         grid += `<div class="proxy-name">${proxyEsc}</div>`;
         grid += `<div class="proxy-meta"><span class="proxy-type">${esc(ptype)}</span><span class="proxy-delay ${dcls}">${dlbl}</span></div>`;
         grid += `</div>`;
@@ -345,7 +345,7 @@ async function loadProxySelector() {
       grid += '</div>';
 
       card.innerHTML = header + grid;
-      card.querySelectorAll('.proxy-item[data-proxy]').forEach(item => {
+      card.querySelectorAll('.proxy-item[data-group]').forEach(item => {
         item.addEventListener('click', () => selectInGroup(item.dataset.group, item.dataset.proxy, item));
       });
       card.querySelector('[data-test-all]').addEventListener('click', (e) => {
@@ -357,15 +357,29 @@ async function loadProxySelector() {
   } catch (e) { toast('Failed to load proxies: ' + e.message, 'error'); }
 }
 
+function updateProxyDelay(name, delay) {
+  const [dlbl, dcls] = delayLabel(delay);
+  const item = document.querySelector(`.proxy-item[data-proxy="${esc(name)}"]`);
+  if (item) {
+    const span = item.querySelector('.proxy-delay');
+    if (span) { span.textContent = dlbl; span.className = 'proxy-delay ' + dcls; }
+  }
+}
+
 async function testAllInGroup(names, card) {
   const btn = card.querySelector('[data-test-all]');
   if (btn) { btn.classList.add('testing'); btn.disabled = true; }
-  const promises = names.map(n =>
-    api(`/proxies/${encodeURIComponent(n)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`).catch(() => {})
-  );
-  await Promise.all(promises);
-  await new Promise(r => setTimeout(r, 300));
-  loadProxySelector();
+  let pending = 0;
+  for (const n of names) {
+    pending++;
+    api(`/proxies/${encodeURIComponent(n)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`)
+      .then(r => {
+        if (r && r.delay) updateProxyDelay(n, r.delay);
+        else updateProxyDelay(n, 0);
+      })
+      .catch(() => updateProxyDelay(n, 0))
+      .finally(() => { pending--; if (pending === 0 && btn) { btn.classList.remove('testing'); btn.disabled = false; } });
+  }
 }
 
 async function selectInGroup(group, proxy, el) {
