@@ -65,9 +65,20 @@ impl TProxyListener {
         // Collect upstream proxy server IPs for firewall bypass
         let bypass_ips = collect_proxy_server_ips(&self.tunnel);
 
-        // Set up firewall redirect rules (tears down on drop)
-        let _firewall =
-            FirewallGuard::setup(self.listen_addr.port(), self.routing_mark, &bypass_ips)?;
+        // Try to set up firewall redirect rules (non-fatal — the user may
+        // manage rules externally via their own nftables/iptables setup).
+        let _firewall = FirewallGuard::setup(
+            self.listen_addr.port(),
+            self.routing_mark,
+            &bypass_ips,
+        )
+        .map_err(|e| {
+            warn!(
+                "Failed to set up automatic TProxy firewall rules: {e}. \
+                 This is fine if you manage firewall rules manually."
+            );
+        })
+        .ok();
 
         let listener = TcpListener::bind(self.listen_addr).await?;
         info!(
