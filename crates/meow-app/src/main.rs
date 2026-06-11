@@ -16,6 +16,8 @@ use meow_listener::MixedListener;
 use meow_listener::SnifferRuntime;
 #[cfg(feature = "listener-tproxy")]
 use meow_listener::TProxyListener;
+#[cfg(feature = "listener-tproxy")]
+use meow_listener::RedirListener;
 use meow_tunnel::Tunnel;
 use parking_lot::RwLock;
 use std::net::{IpAddr, SocketAddr};
@@ -633,6 +635,27 @@ async fn run(
                 #[cfg(not(feature = "listener-tproxy"))]
                 tracing::warn!(
                     "listener '{}': TProxy requires feature 'listener-tproxy'",
+                    nl.name
+                );
+            }
+            ListenerType::Redir => {
+                #[cfg(feature = "listener-tproxy")]
+                {
+                    let listener = RedirListener::new(
+                        tunnel.clone(),
+                        addr,
+                        Some(Arc::clone(&sniffer_runtime)),
+                        nl.name.clone(),
+                    );
+                    tokio::spawn(async move {
+                        if let Err(e) = listener.run().await {
+                            error!("Redir listener error: {}", e);
+                        }
+                    });
+                }
+                #[cfg(not(feature = "listener-tproxy"))]
+                tracing::warn!(
+                    "listener '{}': Redir requires feature 'listener-tproxy'",
                     nl.name
                 );
             }

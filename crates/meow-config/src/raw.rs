@@ -103,6 +103,7 @@ pub struct RawConfig {
     pub sub_rules: Option<HashMap<String, Vec<String>>>,
     pub subscriptions: Option<Vec<RawSubscription>>,
     pub tproxy_port: Option<u16>,
+    pub redir_port: Option<u16>,
     pub tproxy_sni: Option<bool>,
     pub routing_mark: Option<u32>,
     /// Static host → IP mappings, preferred over upstream DNS lookups.

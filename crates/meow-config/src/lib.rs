@@ -61,6 +61,7 @@ pub enum ListenerType {
     Http,
     Socks5,
     TProxy,
+    Redir,
 }
 
 impl std::fmt::Display for ListenerType {
@@ -70,6 +71,7 @@ impl std::fmt::Display for ListenerType {
             ListenerType::Http => write!(f, "http"),
             ListenerType::Socks5 => write!(f, "socks5"),
             ListenerType::TProxy => write!(f, "tproxy"),
+            ListenerType::Redir => write!(f, "redir"),
         }
     }
 }
@@ -781,8 +783,9 @@ fn parse_listener_type(s: &str) -> Result<ListenerType, anyhow::Error> {
         "http" => Ok(ListenerType::Http),
         "socks5" => Ok(ListenerType::Socks5),
         "tproxy" => Ok(ListenerType::TProxy),
+        "redir" => Ok(ListenerType::Redir),
         other => anyhow::bail!(
-            "unknown listener type '{other}'; expected mixed, http, socks5, or tproxy"
+            "unknown listener type '{other}'; expected mixed, http, socks5, tproxy, or redir"
         ),
     }
 }
@@ -868,6 +871,16 @@ fn build_named_listeners(
             port,
             default_bind,
             global_tproxy_sni,
+            global_max_conns,
+        )?;
+    }
+    if let Some(port) = raw.redir_port {
+        add(
+            "redir",
+            ListenerType::Redir,
+            port,
+            default_bind,
+            false,
             global_max_conns,
         )?;
     }

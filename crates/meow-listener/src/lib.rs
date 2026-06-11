@@ -8,9 +8,13 @@ pub mod mixed;
 pub mod socks5;
 #[cfg(feature = "listener-tproxy")]
 pub mod tproxy;
+#[cfg(feature = "listener-tproxy")]
+pub mod redir;
 
 #[cfg(feature = "listener-mixed")]
 pub use mixed::MixedListener;
 pub use sniffer::SnifferRuntime;
+#[cfg(feature = "listener-tproxy")]
+pub use redir::RedirListener;
 #[cfg(feature = "listener-tproxy")]
 pub use tproxy::TProxyListener;
