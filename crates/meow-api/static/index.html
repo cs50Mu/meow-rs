@@ -57,6 +57,14 @@ input:focus, select:focus { outline: none; border-color: #64b5f6; }
 .proxy-item:hover { border-color: #64b5f6; background: rgba(100,181,246,0.1); }
 .proxy-item.selected { border-color: #64b5f6; background: #1565c0; color: white; }
 .proxy-item.non-select { cursor: default; border-color: #2a3a4a; }
+.proxy-delay { font-size: 11px; margin-left: 6px; }
+.proxy-delay.good { color: #81c784; }
+.proxy-delay.ok { color: #ffb74d; }
+.proxy-delay.bad { color: #ef5350; }
+.proxy-delay.none { color: #556677; }
+.btn-test { background: none; border: 1px solid #2a3a4a; color: #8899aa; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 4px; }
+.btn-test:hover { border-color: #64b5f6; color: #64b5f6; }
+.btn-test.testing { opacity: 0.5; cursor: wait; }
 .rule-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #2a3a4a; }
 .rule-row .grip { cursor: grab; color: #556677; padding: 0 4px; user-select: none; }
 .rule-row .grip:active { cursor: grabbing; }
@@ -282,9 +290,19 @@ async function setMode(mode) {
 
 // ── Proxies Tab (selector switching) ─────────────────────────────
 
+function delayLabel(ms) {
+  if (!ms || ms <= 0) return ['Timeout', 'none'];
+  if (ms < 300) return [ms + 'ms', 'good'];
+  if (ms < 800) return [ms + 'ms', 'ok'];
+  return [ms + 'ms', 'bad'];
+}
+
+function delayClass(ms) { return delayLabel(ms)[1]; }
+
 async function loadProxySelector() {
   try {
-    const groups = await api('/api/proxy-groups');
+    const [groups, proxies] = await Promise.all([api('/api/proxy-groups'), api('/proxies')]);
+    const pmap = proxies.proxies || {};
     const container = document.getElementById('proxy-groups-selector');
     const empty = document.getElementById('proxy-selector-empty');
     container.innerHTML = '';
@@ -298,15 +316,20 @@ async function loadProxySelector() {
 
       let header = `<div class="group-header"><strong>${esc(g.name)}</strong> <span class="badge badge-${badgeClass}">${esc(g.type)}</span>`;
       if (isSelector && g.now) header += ` <span style="color:#8899aa;font-size:12px">current: ${esc(g.now)}</span>`;
+      header += ` <button class="btn-test" data-test-all="${esc(g.name)}" title="Test all proxies in this group">&#x26A1; Test All</button>`;
       header += '</div>';
 
       let grid = '<div class="proxy-grid">';
       for (const p of g.proxies) {
         const selected = (p === g.now) ? ' selected' : '';
+        const info = pmap[p];
+        const delay = info && info.history && info.history.length > 0 ? info.history[info.history.length - 1].delay : 0;
+        const [dlbl, dcls] = delayLabel(delay);
+        const proxyEsc = esc(p);
         if (isSelector) {
-          grid += `<div class="proxy-item${selected}" data-group="${esc(g.name)}" data-proxy="${esc(p)}" title="${esc(p)}">${esc(p)}</div>`;
+          grid += `<div class="proxy-item${selected}" data-group="${esc(g.name)}" data-proxy="${proxyEsc}" title="${proxyEsc}">${proxyEsc}<span class="proxy-delay ${dcls}">${dlbl}</span><button class="btn-test" data-test="${proxyEsc}" onclick="event.stopPropagation(); testProxyDelay('${proxyEsc}', this)" title="Test latency">&#x26A1;</button></div>`;
         } else {
-          grid += `<div class="proxy-item non-select" title="${esc(p)}">${esc(p)}</div>`;
+          grid += `<div class="proxy-item non-select" title="${proxyEsc}">${proxyEsc}<span class="proxy-delay ${dcls}">${dlbl}</span><button class="btn-test" data-test="${proxyEsc}" onclick="event.stopPropagation(); testProxyDelay('${proxyEsc}', this)" title="Test latency">&#x26A1;</button></div>`;
         }
       }
       grid += '</div>';
@@ -315,9 +338,31 @@ async function loadProxySelector() {
       card.querySelectorAll('.proxy-item[data-proxy]').forEach(item => {
         item.addEventListener('click', () => selectInGroup(item.dataset.group, item.dataset.proxy, item));
       });
+      card.querySelector('[data-test-all]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        testAllInGroup(g.proxies, card);
+      });
       container.appendChild(card);
     }
   } catch (e) { toast('Failed to load proxies: ' + e.message, 'error'); }
+}
+
+async function testProxyDelay(name, btn) {
+  if (btn) { btn.classList.add('testing'); btn.disabled = true; }
+  try {
+    await api(`/proxies/${encodeURIComponent(name)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`);
+    loadProxySelector();
+  } catch (e) {
+    if (btn) { btn.classList.remove('testing'); btn.disabled = false; }
+  }
+}
+
+async function testAllInGroup(names, card) {
+  const btn = card.querySelector('[data-test-all]');
+  if (btn) { btn.classList.add('testing'); btn.disabled = true; }
+  const promises = names.map(n => api(`/proxies/${encodeURIComponent(n)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`).catch(() => {}));
+  await Promise.all(promises);
+  loadProxySelector();
 }
 
 async function selectInGroup(group, proxy, el) {
