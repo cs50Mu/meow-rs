@@ -361,18 +361,20 @@ async function testProxyDelay(name, btn) {
   if (btn) { btn.classList.add('testing'); btn.disabled = true; }
   try {
     await api(`/proxies/${encodeURIComponent(name)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`);
-    // Brief delay so the proxy health is flushed before re-fetch.
-    await new Promise(r => setTimeout(r, 300));
-    loadProxySelector();
   } catch (e) {
-    if (btn) { btn.classList.remove('testing'); btn.disabled = false; }
+    // 504 = timeout, 503 = error — both mean the proxy is unreachable.
+    // Refresh the UI anyway so the "Timeout" status is displayed.
   }
+  await new Promise(r => setTimeout(r, 300));
+  loadProxySelector();
 }
 
 async function testAllInGroup(names, card) {
   const btn = card.querySelector('[data-test-all]');
   if (btn) { btn.classList.add('testing'); btn.disabled = true; }
-  const promises = names.map(n => api(`/proxies/${encodeURIComponent(n)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`).catch(() => {}));
+  const promises = names.map(n =>
+    api(`/proxies/${encodeURIComponent(n)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`).catch(() => {})
+  );
   await Promise.all(promises);
   await new Promise(r => setTimeout(r, 300));
   loadProxySelector();
