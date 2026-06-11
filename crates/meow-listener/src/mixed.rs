@@ -1,11 +1,8 @@
 use crate::http_proxy;
 use crate::sniffer::SnifferRuntime;
 use crate::socks5;
-use crate::tproxy::orig_dest;
 use meow_common::AuthConfig;
-use meow_common::{ConnType, Metadata, Network};
-use meow_tunnel::{copy_bidirectional_buf, ConnectionGuard, Tunnel, RELAY_BUF_SIZE};
-use smallvec::smallvec;
+use meow_tunnel::Tunnel;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -145,16 +142,16 @@ async fn handle_connection(
     port: u16,
     auth: Option<Arc<AuthConfig>>,
 ) {
-    // Peek first bytes to determine protocol.
-    let mut peek = [0u8; 8];
-    let n = match stream.peek(&mut peek).await {
+    // Peek the first byte to determine protocol
+    let mut peek = [0u8; 1];
+    match stream.peek(&mut peek).await {
         Ok(0) => return,
-        Ok(n) => n,
+        Ok(_) => {}
         Err(e) => {
             debug!("Peek error: {}", e);
             return;
         }
-    };
+    }
 
     if peek[0] == 0x05 {
         // SOCKS5
@@ -168,8 +165,8 @@ async fn handle_connection(
             port,
         )
         .await;
-    } else if is_http_proxy_request(&peek[..n]) {
-        // HTTP proxy (CONNECT or GET http://host/path)
+    } else {
+        // HTTP proxy
         http_proxy::handle_http(
             &tunnel,
             stream,
@@ -180,130 +177,5 @@ async fn handle_connection(
             port,
         )
         .await;
-    } else {
-        // Transparent proxy (TLS ClientHello, bare HTTP, or other TCP)
-        handle_transparent_proxy(&tunnel, stream, src_addr, sniffer, &name, port).await;
-    }
-}
-
-/// Returns true if the peeked bytes look like an HTTP proxy request:
-/// starts with an ASCII HTTP method and has an absolute URI or CONNECT target.
-fn is_http_proxy_request(peek: &[u8]) -> bool {
-    let head = String::from_utf8_lossy(peek);
-    let first_line = head.lines().next().unwrap_or("");
-    let parts: Vec<&str> = first_line.split_whitespace().collect();
-    if parts.len() < 3 {
-        return false;
-    }
-    let method = parts[0];
-    let target = parts[1];
-    // Valid HTTP method — all uppercase ASCII letters
-    if !method
-        .as_bytes()
-        .iter()
-        .all(|b| b.is_ascii_uppercase())
-    {
-        return false;
-    }
-    // CONNECT always goes to HTTP proxy handler
-    if method.eq_ignore_ascii_case("CONNECT") {
-        return true;
-    }
-    // Absolute URI (http://host/path) → proxy request
-    target.starts_with("http://") || target.starts_with("https://")
-}
-
-/// Handle a transparent proxy connection: recover the original destination
-/// from the socket, sniff the hostname, and relay through the tunnel.
-async fn handle_transparent_proxy(
-    tunnel: &Tunnel,
-    mut stream: tokio::net::TcpStream,
-    src_addr: SocketAddr,
-    sniffer: Option<Arc<SnifferRuntime>>,
-    name: &str,
-    in_port: u16,
-) {
-    // Try to recover the original destination (works with iptables REDIRECT
-    // via SO_ORIGINAL_DST on Linux).
-    let listen_addr = stream
-        .local_addr()
-        .ok()
-        .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], in_port)));
-    let orig_dst = match orig_dest::get_original_dst(&stream, listen_addr) {
-        Ok(dst) => dst,
-        Err(e) => {
-            debug!("Failed to get original dst for {}: {}", src_addr, e);
-            return;
-        }
-    };
-    if orig_dst == listen_addr {
-        return;
-    }
-
-    let mut metadata = Metadata {
-        network: Network::Tcp,
-        conn_type: ConnType::TProxy,
-        src_ip: Some(src_addr.ip()),
-        src_port: src_addr.port(),
-        dst_ip: Some(orig_dst.ip()),
-        dst_port: orig_dst.port(),
-        in_name: name.into(),
-        in_port,
-        ..Default::default()
-    };
-
-    // Sniff TLS SNI or HTTP Host header for the hostname.
-    if let Some(rt) = sniffer.as_deref() {
-        rt.sniff(&stream, &mut metadata).await;
-    }
-    let mut hostname = metadata.sniff_host.clone();
-    if hostname.is_empty() {
-        if let Some(domain) = tunnel.resolver().reverse_lookup(orig_dst.ip()) {
-            hostname = domain;
-        }
-    }
-    metadata.host = hostname;
-
-    let inner = tunnel.inner();
-    let Some((proxy, rule_name, rule_payload)) = inner.resolve_proxy(&metadata) else {
-        debug!("No matching rule for transparent proxy from {}", src_addr);
-        return;
-    };
-
-    info!(
-        "{} --> {} match {}({}) using {}",
-        metadata.source_address(),
-        metadata.remote_address(),
-        rule_name,
-        rule_payload,
-        proxy.name()
-    );
-
-    let _guard = ConnectionGuard::track(
-        &inner.stats,
-        metadata.pure(),
-        rule_name,
-        rule_payload,
-        smallvec![Arc::from(proxy.name())],
-    );
-
-    match proxy.dial_tcp(&metadata).await {
-        Ok(mut remote) => {
-            let mut buf1 = vec![0u8; RELAY_BUF_SIZE];
-            let mut buf2 = vec![0u8; RELAY_BUF_SIZE];
-            let _ = copy_bidirectional_buf(
-                &mut stream,
-                &mut remote,
-                &mut buf1,
-                &mut buf2,
-            )
-            .await;
-        }
-        Err(e) => {
-            debug!(
-                "Transparent proxy dial error for {} -> {}: {}",
-                src_addr, orig_dst, e
-            );
-        }
     }
 }
