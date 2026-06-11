@@ -7,35 +7,39 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
-use std::time::SystemTime;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct DelayHistory {
-    /// Unix timestamp in milliseconds (matches mihomo JSON format).
-    #[serde(
-        serialize_with = "serialize_system_time_ms",
-        deserialize_with = "deserialize_system_time_ms"
-    )]
-    pub time: SystemTime,
+    /// RFC 3339 / ISO 8601 string (matches mihomo JSON format).
+    pub time: String,
     pub delay: u16,
 }
 
-fn serialize_system_time_ms<S: serde::Serializer>(
-    t: &SystemTime,
-    s: S,
-) -> std::result::Result<S::Ok, S::Error> {
-    let ms = t
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    s.serialize_u64(ms)
+impl Serialize for DelayHistory {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("DelayHistory", 2)?;
+        st.serialize_field("time", &self.time)?;
+        st.serialize_field("delay", &self.delay)?;
+        st.end()
+    }
 }
 
-fn deserialize_system_time_ms<'de, D: serde::Deserializer<'de>>(
-    d: D,
-) -> std::result::Result<SystemTime, D::Error> {
-    let ms: u64 = serde::Deserialize::deserialize(d)?;
-    Ok(SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms))
+impl<'de> Deserialize<'de> for DelayHistory {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Helper {
+            time: String,
+            delay: u16,
+        }
+        let h = Helper::deserialize(d)?;
+        Ok(DelayHistory {
+            time: h.time,
+            delay: h.delay,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,8 +96,11 @@ impl ProxyHealth {
             .history
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap_or_default();
         history.push_back(DelayHistory {
-            time: SystemTime::now(),
+            time: now,
             delay,
         });
         if history.len() > self.max_history {

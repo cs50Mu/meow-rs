@@ -914,10 +914,20 @@ async fn build_config(
         .parse::<TunnelMode>()
         .unwrap_or(TunnelMode::Rule);
     let log_level = raw.log_level.clone().unwrap_or_else(|| "info".to_string());
-    let bind_address = raw
-        .bind_address
-        .clone()
-        .unwrap_or_else(|| "127.0.0.1".to_string());
+    // When allow-lan is true and no explicit bind-address, default to
+    // all-interfaces (matching mihomo). Otherwise default to localhost.
+    let allow_lan = raw.allow_lan.unwrap_or(false);
+    let mut bind_address = raw.bind_address.clone().unwrap_or_else(|| {
+        if allow_lan {
+            "0.0.0.0".to_string()
+        } else {
+            "127.0.0.1".to_string()
+        }
+    });
+    // `*` is a mihomo convention meaning "all interfaces".
+    if bind_address == "*" {
+        bind_address = "0.0.0.0".to_string();
+    }
 
     let general = GeneralConfig {
         mode,
