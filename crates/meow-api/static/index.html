@@ -339,7 +339,7 @@ async function loadProxySelector() {
         const dataAttr = isSelector ? ` data-group="${esc(g.name)}" data-proxy="${proxyEsc}"` : '';
         grid += `<div class="${itemCls}"${dataAttr} title="${proxyEsc}">`;
         grid += `<div class="proxy-name">${proxyEsc}</div>`;
-        grid += `<div class="proxy-meta"><span class="proxy-type">${esc(ptype)}</span><span class="proxy-delay ${dcls}">${dlbl}</span><button class="btn-test" data-test="${proxyEsc}" onclick="event.stopPropagation(); testProxyDelay('${proxyEsc}', this)" title="Test latency">&#x26A1;</button></div>`;
+        grid += `<div class="proxy-meta"><span class="proxy-type">${esc(ptype)}</span><span class="proxy-delay ${dcls}">${dlbl}</span></div>`;
         grid += `</div>`;
       }
       grid += '</div>';
@@ -355,18 +355,6 @@ async function loadProxySelector() {
       container.appendChild(card);
     }
   } catch (e) { toast('Failed to load proxies: ' + e.message, 'error'); }
-}
-
-async function testProxyDelay(name, btn) {
-  if (btn) { btn.classList.add('testing'); btn.disabled = true; }
-  try {
-    await api(`/proxies/${encodeURIComponent(name)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`);
-  } catch (e) {
-    // 504 = timeout, 503 = error — both mean the proxy is unreachable.
-    // Refresh the UI anyway so the "Timeout" status is displayed.
-  }
-  await new Promise(r => setTimeout(r, 300));
-  loadProxySelector();
 }
 
 async function testAllInGroup(names, card) {
