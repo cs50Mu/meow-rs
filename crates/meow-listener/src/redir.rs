@@ -6,7 +6,7 @@ use smallvec::smallvec;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub struct RedirListener {
     tunnel: Tunnel,
@@ -38,7 +38,18 @@ impl RedirListener {
         );
 
         loop {
-            let (stream, src_addr) = listener.accept().await?;
+            let (stream, src_addr) = match listener.accept().await {
+                Ok(v) => v,
+                Err(e) => {
+                    // EMFILE / ENFILE — back off and retry, don't kill the listener.
+                    if e.raw_os_error() == Some(24) || e.raw_os_error() == Some(23) {
+                        warn!("Redir listener accept failed: {e}; backing off for 1s");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            };
             let tunnel = self.tunnel.clone();
             let listen_addr = self.listen_addr;
             let sniffer = self.sniffer.clone();

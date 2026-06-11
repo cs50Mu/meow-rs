@@ -87,7 +87,17 @@ impl TProxyListener {
         );
 
         loop {
-            let (stream, src_addr) = listener.accept().await?;
+            let (stream, src_addr) = match listener.accept().await {
+                Ok(v) => v,
+                Err(e) => {
+                    if e.raw_os_error() == Some(24) || e.raw_os_error() == Some(23) {
+                        warn!("TProxy listener accept failed: {e}; backing off for 1s");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            };
             let tunnel = self.tunnel.clone();
             let listen_addr = self.listen_addr;
             let sniffer = self.sniffer.clone();
