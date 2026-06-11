@@ -866,7 +866,7 @@ fn build_named_listeners(
             "tproxy",
             ListenerType::TProxy,
             port,
-            "127.0.0.1",
+            default_bind,
             global_tproxy_sni,
             global_max_conns,
         )?;
@@ -875,14 +875,7 @@ fn build_named_listeners(
     // Explicit `listeners:` entries
     for raw_l in raw.listeners.as_deref().unwrap_or(&[]) {
         let ltype = parse_listener_type(&raw_l.listener_type)?;
-        let listen = raw_l
-            .listen
-            .as_deref()
-            .unwrap_or(if ltype == ListenerType::TProxy {
-                "127.0.0.1"
-            } else {
-                default_bind
-            });
+        let listen = raw_l.listen.as_deref().unwrap_or(default_bind);
         let tproxy_sni = raw_l.tproxy_sni.unwrap_or(global_tproxy_sni);
         let max_connections = raw_l.max_connections.unwrap_or(global_max_conns);
         add(
