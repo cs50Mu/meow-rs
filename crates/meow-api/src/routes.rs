@@ -310,11 +310,18 @@ async fn get_proxy(
     Path(name): Path<String>,
 ) -> Result<Json<ProxyInfo>, StatusCode> {
     let route = state.tunnel.route_snapshot();
-    let proxy = route
-        .proxies
-        .get(name.as_str())
-        .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(ProxyInfo::from_proxy(proxy)))
+    if let Some(proxy) = route.proxies.get(name.as_str()) {
+        return Ok(Json(ProxyInfo::from_proxy(proxy)));
+    }
+    // Check proxy providers for provider-backed proxies.
+    for entry in state.proxy_providers.iter() {
+        for p in entry.value().proxies() {
+            if p.name() == name.as_str() {
+                return Ok(Json(ProxyInfo::from_proxy(&p)));
+            }
+        }
+    }
+    Err(StatusCode::NOT_FOUND)
 }
 
 #[derive(Deserialize)]
@@ -1058,9 +1065,28 @@ async fn get_proxy_delay(
     let expected = params.expected.clone();
 
     let route = state.tunnel.route_snapshot();
-    // upstream: hub/route/proxies.go::getProxyDelay — findProxyByName middleware
-    let Some(proxy) = route.proxies.get(name.as_str()).cloned() else {
-        return msg_err(StatusCode::NOT_FOUND, "resource not found");
+    // Check tunnel proxies first, then fall back to provider-backed proxies.
+    let proxy = match route.proxies.get(name.as_str()).cloned() {
+        Some(p) => p,
+        None => {
+            // Search proxy providers for this name.
+            let mut found: Option<Arc<dyn meow_common::Proxy>> = None;
+            for entry in state.proxy_providers.iter() {
+                for p in entry.value().proxies() {
+                    if p.name() == name.as_str() {
+                        found = Some(p);
+                        break;
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+            match found {
+                Some(p) => p,
+                None => return msg_err(StatusCode::NOT_FOUND, "resource not found"),
+            }
+        }
     };
     drop(route);
 
