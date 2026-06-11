@@ -73,12 +73,11 @@ fn main() -> Result<()> {
         return handle_service_command(cmd, &args);
     }
 
-    // Initialize logging + log broadcast channel for GET /logs WebSocket.
-    // The broadcast layer carries LevelFilter::TRACE so the registry's global
-    // max-level is TRACE, preventing the fmt layer's EnvFilter from silencing
-    // DEBUG/TRACE events before LogBroadcastLayer.on_event fires. Per-connection
-    // ?level= filtering in the WS handler provides the client-visible suppression.
-    let log_tx = {
+    // Initialize logging with a reloadable filter so the config's `log-level`
+    // can be applied after loading. The broadcast layer carries LevelFilter::TRACE
+    // so the registry's global max-level is TRACE, preventing the fmt layer's
+    // EnvFilter from silencing DEBUG/TRACE events before LogBroadcastLayer fires.
+    let (log_tx, log_filter_handle) = {
         use meow_api::log_stream::LogBroadcastLayer;
         use tokio::sync::broadcast;
         use tracing_subscriber::filter::LevelFilter;
@@ -86,28 +85,27 @@ fn main() -> Result<()> {
 
         let (tx, _) = broadcast::channel(128);
         let log_layer = LogBroadcastLayer { tx: tx.clone() }.with_filter(LevelFilter::TRACE);
+        let default_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new(
+                    "info,\
+                     anytls_rs=warn,\
+                     hickory_proto=warn,\
+                     reqwest=warn,\
+                     hyper=warn,\
+                     hyper_util=warn,\
+                     tokio_rustls=warn,\
+                     rustls=warn,\
+                     tungstenite=warn"
+                )
+            });
+        let (filter_layer, filter_handle) =
+            tracing_subscriber::reload::Layer::new(default_filter);
         tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::fmt::layer().with_filter(
-                    tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| {
-                            tracing_subscriber::EnvFilter::new(
-                                "info,\
-                                 anytls_rs=error,\
-                                 hickory_proto=warn,\
-                                 reqwest=warn,\
-                                 hyper=warn,\
-                                 hyper_util=warn,\
-                                 tokio_rustls=warn,\
-                                 rustls=warn,\
-                                 tungstenite=warn"
-                            )
-                        }),
-                ),
-            )
+            .with(tracing_subscriber::fmt::layer().with_filter(filter_layer))
             .with(log_layer)
             .init();
-        tx
+        (tx, filter_handle)
     };
 
     info!("meow-rs starting...");
@@ -145,6 +143,22 @@ fn main() -> Result<()> {
 
     runtime.block_on(async move {
         let config = load_config(&config_path).await?;
+        // Apply the configured log-level now that config is loaded.
+        let level = config.general.log_level.as_str();
+        let filter_str = format!(
+            "{level},\
+             anytls_rs=warn,\
+             hickory_proto=warn,\
+             reqwest=warn,\
+             hyper=warn,\
+             hyper_util=warn,\
+             tokio_rustls=warn,\
+             rustls=warn,\
+             tungstenite=warn"
+        );
+        let _ = log_filter_handle.modify(|f| {
+            *f = tracing_subscriber::EnvFilter::new(&filter_str);
+        });
         info!("Config loaded from {}", config_path);
         run(config, config_path, log_tx).await
     })
