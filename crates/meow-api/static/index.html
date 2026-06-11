@@ -53,18 +53,26 @@ input:focus, select:focus { outline: none; border-color: #64b5f6; }
 .group-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .group-header strong { font-size: 15px; }
 .proxy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
-.proxy-item { padding: 8px 12px; border: 1px solid #2a3a4a; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.15s; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proxy-item { padding: 8px 10px; border: 1px solid #2a3a4a; border-radius: 6px; cursor: pointer; font-size: 12px; transition: all 0.15s; display: flex; flex-direction: column; gap: 4px; }
 .proxy-item:hover { border-color: #64b5f6; background: rgba(100,181,246,0.1); }
 .proxy-item.selected { border-color: #64b5f6; background: #1565c0; color: white; }
+.proxy-item.selected .proxy-delay.good,
+.proxy-item.selected .proxy-delay.ok,
+.proxy-item.selected .proxy-delay.bad,
+.proxy-item.selected .proxy-delay.none { color: rgba(255,255,255,0.85); }
+.proxy-item.selected .proxy-type { color: rgba(255,255,255,0.7); }
 .proxy-item.non-select { cursor: default; border-color: #2a3a4a; }
-.proxy-delay { font-size: 11px; margin-left: 6px; }
+.proxy-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.proxy-meta { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+.proxy-type { color: #556677; }
 .proxy-delay.good { color: #81c784; }
 .proxy-delay.ok { color: #ffb74d; }
 .proxy-delay.bad { color: #ef5350; }
 .proxy-delay.none { color: #556677; }
-.btn-test { background: none; border: 1px solid #2a3a4a; color: #8899aa; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 4px; }
+.btn-test { background: none; border: 1px solid #2a3a4a; color: #8899aa; padding: 1px 6px; border-radius: 3px; cursor: pointer; font-size: 10px; margin-left: 4px; flex-shrink: 0; }
 .btn-test:hover { border-color: #64b5f6; color: #64b5f6; }
 .btn-test.testing { opacity: 0.5; cursor: wait; }
+.proxy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
 .rule-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #2a3a4a; }
 .rule-row .grip { cursor: grab; color: #556677; padding: 0 4px; user-select: none; }
 .rule-row .grip:active { cursor: grabbing; }
@@ -325,12 +333,14 @@ async function loadProxySelector() {
         const info = pmap[p];
         const delay = info && info.history && info.history.length > 0 ? info.history[info.history.length - 1].delay : 0;
         const [dlbl, dcls] = delayLabel(delay);
+        const ptype = info ? info.type : '?';
         const proxyEsc = esc(p);
-        if (isSelector) {
-          grid += `<div class="proxy-item${selected}" data-group="${esc(g.name)}" data-proxy="${proxyEsc}" title="${proxyEsc}">${proxyEsc}<span class="proxy-delay ${dcls}">${dlbl}</span><button class="btn-test" data-test="${proxyEsc}" onclick="event.stopPropagation(); testProxyDelay('${proxyEsc}', this)" title="Test latency">&#x26A1;</button></div>`;
-        } else {
-          grid += `<div class="proxy-item non-select" title="${proxyEsc}">${proxyEsc}<span class="proxy-delay ${dcls}">${dlbl}</span><button class="btn-test" data-test="${proxyEsc}" onclick="event.stopPropagation(); testProxyDelay('${proxyEsc}', this)" title="Test latency">&#x26A1;</button></div>`;
-        }
+        const itemCls = isSelector ? `proxy-item${selected}` : 'proxy-item non-select';
+        const dataAttr = isSelector ? ` data-group="${esc(g.name)}" data-proxy="${proxyEsc}"` : '';
+        grid += `<div class="${itemCls}"${dataAttr} title="${proxyEsc}">`;
+        grid += `<div class="proxy-name">${proxyEsc}</div>`;
+        grid += `<div class="proxy-meta"><span class="proxy-type">${esc(ptype)}</span><span class="proxy-delay ${dcls}">${dlbl}</span><button class="btn-test" data-test="${proxyEsc}" onclick="event.stopPropagation(); testProxyDelay('${proxyEsc}', this)" title="Test latency">&#x26A1;</button></div>`;
+        grid += `</div>`;
       }
       grid += '</div>';
 
@@ -351,6 +361,8 @@ async function testProxyDelay(name, btn) {
   if (btn) { btn.classList.add('testing'); btn.disabled = true; }
   try {
     await api(`/proxies/${encodeURIComponent(name)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`);
+    // Brief delay so the proxy health is flushed before re-fetch.
+    await new Promise(r => setTimeout(r, 300));
     loadProxySelector();
   } catch (e) {
     if (btn) { btn.classList.remove('testing'); btn.disabled = false; }
@@ -362,6 +374,7 @@ async function testAllInGroup(names, card) {
   if (btn) { btn.classList.add('testing'); btn.disabled = true; }
   const promises = names.map(n => api(`/proxies/${encodeURIComponent(n)}/delay?timeout=5000&url=http://www.gstatic.com/generate_204`).catch(() => {}));
   await Promise.all(promises);
+  await new Promise(r => setTimeout(r, 300));
   loadProxySelector();
 }
 
