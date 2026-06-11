@@ -144,18 +144,25 @@ fn main() -> Result<()> {
     runtime.block_on(async move {
         let config = load_config(&config_path).await?;
         // Apply the configured log-level now that config is loaded.
+        // Per-crate overrides only make sense when the global level is
+        // low enough that noisy deps would otherwise flood the output.
+        // When the user sets warn/error, obey it globally — don't
+        // accidentally upgrade a crate's level via an override.
         let level = config.general.log_level.as_str();
-        let filter_str = format!(
-            "{level},\
-             anytls_rs=warn,\
-             hickory_proto=warn,\
-             reqwest=warn,\
-             hyper=warn,\
-             hyper_util=warn,\
-             tokio_rustls=warn,\
-             rustls=warn,\
-             tungstenite=warn"
-        );
+        let filter_str = match level {
+            "trace" | "debug" | "info" => format!(
+                "{level},\
+                 anytls_rs=warn,\
+                 hickory_proto=warn,\
+                 reqwest=warn,\
+                 hyper=warn,\
+                 hyper_util=warn,\
+                 tokio_rustls=warn,\
+                 rustls=warn,\
+                 tungstenite=warn"
+            ),
+            _ => level.to_string(),
+        };
         let _ = log_filter_handle.modify(|f| {
             *f = tracing_subscriber::EnvFilter::new(&filter_str);
         });
