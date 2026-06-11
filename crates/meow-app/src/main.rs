@@ -60,6 +60,26 @@ enum Command {
     Status,
 }
 
+/// Raise RLIMIT_NOFILE to the hard limit (matching Go's runtime behaviour).
+/// Without this, the process inherits the default 1024 fd limit and hits EMFILE
+/// under modest traffic.
+fn raise_fd_limit() {
+    #[cfg(unix)]
+    {
+        let mut lim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) } == 0 {
+            let old = lim.rlim_cur;
+            lim.rlim_cur = lim.rlim_max;
+            if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &lim) } == 0 && lim.rlim_cur > old {
+                tracing::info!("Raised fd limit from {old} to {}", lim.rlim_cur);
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     // dhat profiler guard — must be the first local, lives for the duration of main().
     // Writes dh_out.json on drop. Active only when compiled with --features dhat-heap.
@@ -107,6 +127,8 @@ fn main() -> Result<()> {
             .init();
         (tx, filter_handle)
     };
+
+    raise_fd_limit();
 
     info!("meow-rs starting...");
 
