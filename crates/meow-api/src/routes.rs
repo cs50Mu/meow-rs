@@ -757,17 +757,19 @@ async fn get_proxy_groups(State(state): State<Arc<AppState>>) -> Json<Vec<ProxyG
     let result: Vec<ProxyGroupInfo> = groups
         .iter()
         .map(|g| {
-            use meow_proxy::SelectorGroup;
+            // Get members from the live tunnel proxy — this covers both
+            // static `proxies:` and provider-backed (`use:`) members.
+            let members = tunnel_proxies
+                .get(g.name.as_str())
+                .and_then(|p| p.members())
+                .unwrap_or_default();
             let now = tunnel_proxies
                 .get(g.name.as_str())
-                .and_then(|p| p.as_any())
-                .and_then(|a| a.downcast_ref::<SelectorGroup>())
-                .and_then(meow_proxy::SelectorGroup::selected_proxy)
-                .map(|p| p.name().to_string());
+                .and_then(|p| p.current());
             ProxyGroupInfo {
                 name: g.name.clone(),
                 group_type: g.group_type.clone(),
-                proxies: g.proxies.clone().unwrap_or_default(),
+                proxies: members,
                 now,
                 url: g.url.clone(),
                 interval: g.interval,
