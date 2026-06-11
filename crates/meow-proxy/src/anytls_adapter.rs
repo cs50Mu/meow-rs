@@ -70,12 +70,20 @@ impl AnytlsAdapter {
 
         let padding = PaddingFactory::default();
 
-        let client = AnytlsClient::new(
+        // Aggressive session pool config — the default pool has no max size
+        // and keeps idle sessions for 60 s, which exhausts fds under load.
+        let pool_config = anytls_rs::client::SessionPoolConfig {
+            idle_timeout: std::time::Duration::from_secs(5),
+            check_interval: std::time::Duration::from_secs(5),
+            min_idle_sessions: 0,
+        };
+        let client = AnytlsClient::with_pool_config(
             password,
             server_addr.clone(),
             server_name,
             tls_connector,
             padding,
+            pool_config,
         );
 
         Ok(Self {
