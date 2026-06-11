@@ -1,5 +1,5 @@
 mod firewall;
-mod orig_dest;
+pub mod orig_dest;
 
 use crate::sniffer::SnifferRuntime;
 use firewall::FirewallGuard;
