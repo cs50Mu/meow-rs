@@ -360,8 +360,10 @@ async function loadProxySelector() {
 
 function updateProxyDelay(name, delay) {
   const [dlbl, dcls] = delayLabel(delay);
-  const item = document.querySelector(`.proxy-item[data-proxy=${CSS.escape(name)}]`);
-  if (item) {
+  // Iterate all matching items — a proxy may appear in multiple group cards.
+  const items = document.querySelectorAll('.proxy-item');
+  for (const item of items) {
+    if (item.getAttribute('data-proxy') !== name) continue;
     const span = item.querySelector('.proxy-delay');
     if (span) { span.textContent = dlbl; span.className = 'proxy-delay ' + dcls; }
   }
