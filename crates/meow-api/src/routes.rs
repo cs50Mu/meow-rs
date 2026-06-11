@@ -294,6 +294,14 @@ async fn get_proxies(State(state): State<Arc<AppState>>) -> Json<ProxiesResponse
     for (name, proxy) in &route.proxies {
         result.insert(name.to_string(), ProxyInfo::from_proxy(proxy));
     }
+    // Include proxy-provider members so the UI can display individual
+    // proxy details (delay, type, etc.) inside provider-backed groups.
+    for entry in state.proxy_providers.iter() {
+        for p in entry.value().proxies() {
+            let name = p.name().to_string();
+            result.entry(name).or_insert_with(|| ProxyInfo::from_proxy(&p));
+        }
+    }
     Json(ProxiesResponse { proxies: result })
 }
 

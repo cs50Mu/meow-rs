@@ -90,7 +90,19 @@ fn main() -> Result<()> {
             .with(
                 tracing_subscriber::fmt::layer().with_filter(
                     tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                        .unwrap_or_else(|_| {
+                            tracing_subscriber::EnvFilter::new(
+                                "info,\
+                                 anytls_rs=warn,\
+                                 hickory_proto=warn,\
+                                 reqwest=warn,\
+                                 hyper=warn,\
+                                 hyper_util=warn,\
+                                 tokio_rustls=warn,\
+                                 rustls=warn,\
+                                 tungstenite=warn"
+                            )
+                        }),
                 ),
             )
             .with(log_layer)

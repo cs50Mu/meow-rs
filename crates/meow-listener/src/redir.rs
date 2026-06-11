@@ -107,7 +107,7 @@ async fn handle_redir(
         proxy.name()
     );
 
-    let _guard = ConnectionGuard::track(
+    let guard = ConnectionGuard::track(
         &inner.stats,
         metadata.pure(),
         rule_name,
@@ -119,7 +119,10 @@ async fn handle_redir(
         Ok(mut remote) => {
             let mut buf1 = vec![0u8; RELAY_BUF_SIZE];
             let mut buf2 = vec![0u8; RELAY_BUF_SIZE];
-            let _ = copy_bidirectional_buf(&mut stream, &mut remote, &mut buf1, &mut buf2).await;
+            let (up, down) =
+                copy_bidirectional_buf(&mut stream, &mut remote, &mut buf1, &mut buf2).await
+                    .unwrap_or((0, 0));
+            guard.record_traffic(up, down);
         }
         Err(e) => debug!("Redir dial error {} -> {}: {}", src_addr, orig_dst, e),
     }

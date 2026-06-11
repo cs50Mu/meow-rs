@@ -41,6 +41,11 @@ impl<'a> ConnectionGuard<'a> {
     pub fn id(&self) -> uuid::Uuid {
         self.id
     }
+
+    pub fn record_traffic(&self, up: u64, down: u64) {
+        self.stats.add_upload(up as i64);
+        self.stats.add_download(down as i64);
+    }
 }
 
 impl Drop for ConnectionGuard<'_> {
