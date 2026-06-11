@@ -205,9 +205,7 @@ impl Proxy for SelectorGroup {
     }
 
     fn delay_history(&self) -> Vec<DelayHistory> {
-        self.selected_proxy()
-            .map(|p| p.delay_history())
-            .unwrap_or_default()
+        self.health.delay_history()
     }
 
     fn members(&self) -> Option<Vec<String>> {

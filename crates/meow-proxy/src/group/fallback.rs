@@ -138,9 +138,7 @@ impl Proxy for FallbackGroup {
     }
 
     fn delay_history(&self) -> Vec<DelayHistory> {
-        self.first_alive()
-            .map(|p| p.delay_history())
-            .unwrap_or_default()
+        self.health.delay_history()
     }
 
     fn members(&self) -> Option<Vec<String>> {

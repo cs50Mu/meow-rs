@@ -96,11 +96,11 @@ select option { background: #1a2634; }
 </header>
 
 <nav>
-  <button class="active" onclick="switchTab('overview', this)">Overview</button>
-  <button onclick="switchTab('proxies', this)">Proxies</button>
-  <button onclick="switchTab('subscriptions', this)">Subscriptions</button>
-  <button onclick="switchTab('groups', this)">Proxy Groups</button>
-  <button onclick="switchTab('rules', this)">Rules</button>
+  <button class="active" data-tab="overview" onclick="switchTab('overview', this)">Overview</button>
+  <button data-tab="proxies" onclick="switchTab('proxies', this)">Proxies</button>
+  <button data-tab="subscriptions" onclick="switchTab('subscriptions', this)">Subscriptions</button>
+  <button data-tab="groups" onclick="switchTab('groups', this)">Proxy Groups</button>
+  <button data-tab="rules" onclick="switchTab('rules', this)">Rules</button>
 </nav>
 
 <main>
@@ -224,6 +224,7 @@ function switchTab(name, btn) {
   document.getElementById('tab-' + name).classList.remove('hidden');
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  sessionStorage.setItem('activeTab', name);
   if (name === 'overview') loadOverview();
   if (name === 'proxies') loadProxySelector();
   if (name === 'subscriptions') loadSubscriptions();
@@ -611,7 +612,13 @@ async function saveConfig() {
 
 // ── Init ─────────────────────────────────────────────────────────
 
-loadOverview();
+(function init() {
+  const saved = sessionStorage.getItem('activeTab') || 'overview';
+  const btn = document.querySelector(`nav button[data-tab="${saved}"]`);
+  if (btn) switchTab(saved, btn);
+  else loadOverview();
+})();
+
 setInterval(async () => {
   if (!document.getElementById('tab-overview').classList.contains('hidden')) {
     try {
