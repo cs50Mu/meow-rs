@@ -208,7 +208,7 @@ async fn handle_tproxy_conn(
         return Err("no matching rule".into());
     };
 
-    info!(
+    debug!(
         "{} --> {} match {}({}) using {}",
         metadata.source_address(),
         metadata.remote_address(),

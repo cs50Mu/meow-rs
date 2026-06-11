@@ -171,7 +171,7 @@ async fn handle_socks5_inner(
         return Err("no matching rule".into());
     };
 
-    info!(
+    debug!(
         "{} --> {} match {}({}) using {}",
         metadata.source_address(),
         metadata.remote_address(),

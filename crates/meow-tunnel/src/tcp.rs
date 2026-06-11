@@ -72,7 +72,7 @@ pub async fn handle_tcp(
         return;
     };
 
-    info!(
+    debug!(
         "{} --> {} match {}({}) using {}",
         metadata.source_address(),
         metadata.remote_address(),

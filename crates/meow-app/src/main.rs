@@ -93,7 +93,7 @@ fn main() -> Result<()> {
                         .unwrap_or_else(|_| {
                             tracing_subscriber::EnvFilter::new(
                                 "info,\
-                                 anytls_rs=warn,\
+                                 anytls_rs=error,\
                                  hickory_proto=warn,\
                                  reqwest=warn,\
                                  hyper=warn,\

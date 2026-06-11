@@ -167,7 +167,7 @@ async fn handle_http_inner(
             return Err("no matching rule".into());
         };
 
-        info!(
+        debug!(
             "{} --> {} match {}({}) using {}",
             metadata.source_address(),
             metadata.remote_address(),
@@ -254,7 +254,7 @@ async fn handle_http_inner(
             return Err("no matching rule".into());
         };
 
-        info!(
+        debug!(
             "{} --> {} match {}({}) using {}",
             metadata.source_address(),
             metadata.remote_address(),

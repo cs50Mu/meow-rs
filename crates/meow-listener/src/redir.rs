@@ -98,7 +98,7 @@ async fn handle_redir(
         return Ok(());
     };
 
-    info!(
+    debug!(
         "{} --> {} match {}({}) using {}",
         metadata.source_address(),
         metadata.remote_address(),
